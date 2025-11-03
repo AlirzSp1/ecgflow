@@ -381,7 +381,7 @@ requires-dist = [
     { name = "scikit-misc", specifier = ">=0.5.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "statsmodels", specifier = ">=0.14.5" },
-    { name = "timm", editable = "../pytorch-image-models" },
+    { name = "timm", editable = "../pytorch-image-models-ecgflow" },
     { name = "torch", specifier = ">=2.1" },
     { name = "torchmetrics", specifier = ">=1.7.4" },
     { name = "torchvision", specifier = ">=0.22.1" },
@@ -1997,7 +1997,7 @@ wheels = [
 [[package]]
 name = "timm"
 version = "0.9.14.dev0"
-source = { editable = "../pytorch-image-models" }
+source = { editable = "../pytorch-image-models-ecgflow" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "pyyaml" },
