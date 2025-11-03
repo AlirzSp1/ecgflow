@@ -1,0 +1,39 @@
+[project]
+name = "ecgflow"
+version = "1.0.0"
+description = "A foundation model for ECG-based assessment of cardiac and coronary function"
+readme = "README.md"
+authors = [
+    { name = "Jon Moody", email = "jmoody@inviasolutions.com" }
+]
+requires-python = "==3.11.13"
+dependencies = [
+    "dill>=0.4.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.3",
+    "numpy>=2.3.1",
+    "pandas>=2.3.1",
+    "qtconsole>=5.7.0",
+    "scikit-learn>=1.7.0",
+    "scikit-misc>=0.5.1",
+    "seaborn>=0.13.2",
+    "statsmodels>=0.14.5",
+    "timm",
+    "torch>=2.1",
+    "torchmetrics>=1.7.4",
+    "torchvision>=0.22.1",
+    "tqdm>=4.67.1",
+    "wfdb>=4.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+timm = { path = "../pytorch-image-models", editable = true }
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+]
