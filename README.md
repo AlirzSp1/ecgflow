@@ -50,11 +50,12 @@ using the publicly available [PTB-XL dataset](https://physionet.org/content/ptb-
     (ensure both repos are located in a common parent directory) 
  ```$ git clone https://github.com/4dm-labs/pytorch-image-models-ecgflow```
 
- 3. Install the astral `uv` tool, if necessary
+ 3. Install the astral `uv` tool
  ```$ curl -LsSF https://astral.sh/uv/install.sh | sh```
 
  4. Create and populate the local python virtual environment
  ```$ cd ecgflow
+    $ cd ecgflow
     $ uv sync
  ```
 
