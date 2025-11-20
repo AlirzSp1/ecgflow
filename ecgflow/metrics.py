@@ -416,12 +416,13 @@ def calibration_metrics(y_true, y_pred_prob, stderror=False,
     """Return dict of calibration metrics (ICI, E50, E90, Emax)
     
     cf. 
-    Austin & Steyerberg (2019) paper on calibration metric $E_{max}$ 
-    from `rms`
+    Austin & Steyerberg (2019) "The Integrated Calibration Index (ICI)
+    and related metrics for quantifying the calibration of logistic
+    regression models", Stat.Med. 38:4051.
     
     Austin & Steyerberg (2014) "Graphical assessment of internal and
     external calibration of logistic regression models by using loess
-    smoothers"
+    smoothers", Stat.Med. 33:517.
     """
     loess_calibrate = loess.loess(y_pred_prob, y_true)
     loess_calibrate.fit()

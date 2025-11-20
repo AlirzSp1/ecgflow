@@ -40,7 +40,6 @@ def model_predict(
     model.eval()
     with torch.no_grad():
         y_pred, y_true = [], []
-        #for batch_idx, (samples, y) in enumerate(data_loader):
         for batch_d in tqdm(data_loader):
             samples, y = batch_d['X'], batch_d['label']
             samples = samples.to(device)

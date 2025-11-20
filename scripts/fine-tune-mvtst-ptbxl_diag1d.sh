@@ -14,7 +14,7 @@ $(dirname "$0")/train.py \
     --early-stop 10 \
     --ft-top 4 \
     --pretrained \
-    --pretrained-path $EXPHOME/$PRETRAINED_IN/$PRETRAINED_EXP/last.pth.tar \
+    --pretrained-path $EXPHOME/$PRETRAINED_IN/$PRETRAINED_EXP/last.safetensors \
     --dataset ecgflow/$DATANAME \
     --no-aug --no-prefetcher \
     --model $MODELNAME \
