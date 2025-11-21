@@ -54,8 +54,9 @@ using the publicly available [PTB-XL dataset](https://physionet.org/content/ptb-
  ```$ curl -LsSF https://astral.sh/uv/install.sh | sh```
 
  4. Create and populate the local python virtual environment
- ```$ cd ecgflow
-    $ uv sync
+ ```
+$ cd ecgflow
+ uv sync
  ```
 
 # Usage
