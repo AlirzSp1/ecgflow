@@ -133,7 +133,7 @@ available:
 
    - [Prediction of Rhythm labels (SSL)](https://huggingface.co/4dm-labs/1dvit_base_patch50_5000.ssl_mimic_ft_ptbxl-rhythm)
 
-   - [Prediction Form labels (SSL)](https://huggingface.co/4dm-labs/1dvit_base_patch50_5000.ssl_mimic_ft_ptbxl-form)
+   - [Prediction of Form labels (SSL)](https://huggingface.co/4dm-labs/1dvit_base_patch50_5000.ssl_mimic_ft_ptbxl-form)
 
  - The same 1dViT architecture trained de novo from random initialization for the same three multi-label tasks:
  
@@ -141,4 +141,4 @@ available:
 
    - [Prediction of Rhythm labels (de novo)](https://huggingface.co/4dm-labs/1dvit_base_patch50_5000.ptbxl-rhythm)
 
-   - [Prediction Form labels (de novo)](https://huggingface.co/4dm-labs/1dvit_base_patch50_5000.ptbxl-form)
+   - [Prediction of Form labels (de novo)](https://huggingface.co/4dm-labs/1dvit_base_patch50_5000.ptbxl-form)
