@@ -96,24 +96,27 @@ Use the `uv` tool within the top-level `ecgflow` directory to run the scripts.
 
 ### SSL pretraining
 
-```$ cd ecgflow
-   $ uv run scripts/pretrain-mtsm-mimic.sh
+```
+$ cd ecgflow
+$ uv run scripts/pretrain-mtsm-mimic.sh
 ```
 
 ### Supervised fine-tuning
 
-```$ cd ecgflow
-   $ uv run scripts/fine-tune-mvtst-ptbxl_diag1d.sh
-   $ uv run scripts/fine-tune-mvtst-ptbxl_rhythm1d.sh
-   $ uv run scripts/fine-tune-mvtst-ptbxl_form1d.sh
+```
+$ cd ecgflow
+$ uv run scripts/fine-tune-mvtst-ptbxl_diag1d.sh
+$ uv run scripts/fine-tune-mvtst-ptbxl_rhythm1d.sh
+$ uv run scripts/fine-tune-mvtst-ptbxl_form1d.sh
 ```
 
 ### De novo supervised training
 
-```$ cd ecgflow
-   $ uv run scripts/train-mvtst-ptbxl_diag1d.sh
-   $ uv run scripts/train-mvtst-ptbxl_rhythm1d.sh
-   $ uv run scripts/train-mvtst-ptbxl_form1d.sh
+```
+$ cd ecgflow
+$ uv run scripts/train-mvtst-ptbxl_diag1d.sh
+$ uv run scripts/train-mvtst-ptbxl_rhythm1d.sh
+$ uv run scripts/train-mvtst-ptbxl_form1d.sh
 ```
 
 # Pretrained models
