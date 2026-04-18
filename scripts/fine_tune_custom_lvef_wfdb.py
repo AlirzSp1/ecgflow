@@ -17,12 +17,19 @@ Example:
 import argparse
 import importlib.util
 import math
+<<<<<<< HEAD
+=======
+import os
+>>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+<<<<<<< HEAD
 import torch
+=======
+>>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
 import wfdb
 from scipy import signal
 
@@ -205,9 +212,14 @@ class CustomLvefWfdbData:
         return len(self.id_list)
 
 
+<<<<<<< HEAD
 class CustomLvefWfdbDataset(torch.utils.data.Dataset):
     def __init__(self, data_instance, name, **kwargs):
         super().__init__()
+=======
+class CustomLvefWfdbDataset:
+    def __init__(self, data_instance, name, **kwargs):
+>>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
         self.data = data_instance
         self.name = name
         self.id_list = data_instance.id_list
@@ -224,6 +236,11 @@ class CustomLvefWfdbDataset(torch.utils.data.Dataset):
         return len(self.id_list)
 
     def __getitem__(self, idx):
+<<<<<<< HEAD
+=======
+        import torch
+
+>>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
         data = self.data
         rec = wfdb.rdrecord(self.record_list[idx])
         wf = rec.p_signal.T
@@ -309,11 +326,28 @@ def parse_args():
     parser.add_argument("--scale-source", choices=("ptbxl", "mimic"), default="ptbxl")
     parser.add_argument("--input-channels", type=int, choices=(8, 12), default=8)
     parser.add_argument("--swap-avl-avf", action="store_true", help="Swap aVL/aVF before channel trimming.")
+<<<<<<< HEAD
+=======
+    parser.add_argument(
+        "--cuda-visible-devices",
+        default=None,
+        help=(
+            "Set CUDA_VISIBLE_DEVICES for this training process before PyTorch "
+            "is imported, e.g. '0', '1', or '0,2'."
+        ),
+    )
+>>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
     return parser.parse_known_args()
 
 
 def main():
     args, passthrough = parse_args()
+<<<<<<< HEAD
+=======
+    if args.cuda_visible_devices is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
+
+>>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
     metadata_file = Path(args.metadata_file).expanduser()
     data_dir = Path(args.data_dir).expanduser() if args.data_dir else metadata_file.parent
 
