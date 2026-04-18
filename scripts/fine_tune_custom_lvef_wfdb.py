@@ -17,19 +17,12 @@ Example:
 import argparse
 import importlib.util
 import math
-<<<<<<< HEAD
-=======
 import os
->>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-<<<<<<< HEAD
-import torch
-=======
->>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
 import wfdb
 from scipy import signal
 
@@ -212,14 +205,8 @@ class CustomLvefWfdbData:
         return len(self.id_list)
 
 
-<<<<<<< HEAD
-class CustomLvefWfdbDataset(torch.utils.data.Dataset):
-    def __init__(self, data_instance, name, **kwargs):
-        super().__init__()
-=======
 class CustomLvefWfdbDataset:
     def __init__(self, data_instance, name, **kwargs):
->>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
         self.data = data_instance
         self.name = name
         self.id_list = data_instance.id_list
@@ -236,11 +223,8 @@ class CustomLvefWfdbDataset:
         return len(self.id_list)
 
     def __getitem__(self, idx):
-<<<<<<< HEAD
-=======
         import torch
 
->>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
         data = self.data
         rec = wfdb.rdrecord(self.record_list[idx])
         wf = rec.p_signal.T
