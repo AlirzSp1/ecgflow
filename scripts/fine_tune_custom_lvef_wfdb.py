@@ -326,8 +326,6 @@ def parse_args():
     parser.add_argument("--scale-source", choices=("ptbxl", "mimic"), default="ptbxl")
     parser.add_argument("--input-channels", type=int, choices=(8, 12), default=8)
     parser.add_argument("--swap-avl-avf", action="store_true", help="Swap aVL/aVF before channel trimming.")
-<<<<<<< HEAD
-=======
     parser.add_argument(
         "--cuda-visible-devices",
         default=None,
@@ -336,18 +334,14 @@ def parse_args():
             "is imported, e.g. '0', '1', or '0,2'."
         ),
     )
->>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
     return parser.parse_known_args()
 
 
 def main():
     args, passthrough = parse_args()
-<<<<<<< HEAD
-=======
     if args.cuda_visible_devices is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
 
->>>>>>> 23d88f3 (update codes to get `CUDA_VISIBLE_DEVICES`)
     metadata_file = Path(args.metadata_file).expanduser()
     data_dir = Path(args.data_dir).expanduser() if args.data_dir else metadata_file.parent
 
