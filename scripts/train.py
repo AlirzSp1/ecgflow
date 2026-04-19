@@ -402,6 +402,10 @@ group.add_argument('--eval-metric', default='top1', type=str, metavar='EVAL_METR
 group.add_argument('--tta', type=int, default=0, metavar='N',
                    help='Test/inference time augmentation (oversampling) factor. 0=None (default: 0)')
 group.add_argument("--local_rank", default=0, type=int)
+group.add_argument('--dist-backend', default='nccl', type=str,
+                   help='Distributed process group backend')
+group.add_argument('--dist-url', default='env://', type=str,
+                   help='Distributed process group init method')
 group.add_argument('--use-multi-epochs-loader', action='store_true', default=False,
                    help='use the multi-epochs-loader to save time at the beginning of every epoch')
 group.add_argument('--log-wandb', action='store_true', default=False,
@@ -414,6 +418,8 @@ group.add_argument('--wandb-entity', default='', type=str,
                    help='Weights & Biases entity/team')
 group.add_argument('--wandb-tags', nargs='*', default=[],
                    help='Weights & Biases tags')
+group.add_argument('--wandb-skip-system-info', action='store_true', default=False,
+                   help='disable W&B system stats, machine info, metadata, git, and code logging')
 group.add_argument('--early-stop', default=None, type=int, metavar='N',
                    help=('stop training iterations early if evaluation metric '
                          'on validation data does not improve for N epochs'))
@@ -911,12 +917,23 @@ def main():
 
     if utils.is_primary(args) and args.log_wandb:
         if has_wandb:
+            wandb_settings = None
+            if args.wandb_skip_system_info:
+                wandb_settings = wandb.Settings(
+                    x_disable_stats=True,
+                    x_disable_machine_info=True,
+                    x_disable_meta=True,
+                    disable_git=True,
+                    disable_code=True,
+                    x_save_requirements=False,
+                )
             wandb.init(
                 project=args.wandb_project or args.experiment,
                 name=args.wandb_run_name or None,
                 entity=args.wandb_entity or None,
                 tags=args.wandb_tags or None,
                 config=args,
+                settings=wandb_settings,
             )
         else:
             _logger.warning(
@@ -951,10 +968,14 @@ def main():
         bin_m = None
         if not args.mse_loss and not args.mslq_loss:
             if args.num_classes == 2:
-                bin_m = utils.get_binary_torchmetrics(prefix='')
+                bin_m = utils.get_binary_torchmetrics(
+                    prefix='', compute_on_cpu=not args.distributed)
             elif args.num_classes > 2:
                 bin_m = utils.get_multilabel_torchmetrics(args.num_classes,
-                                                          prefix='')
+                                                          prefix='',
+                                                          compute_on_cpu=not args.distributed)
+            if bin_m is not None and args.distributed:
+                bin_m = bin_m.to(device)
     try:
         for epoch in range(start_epoch, num_epochs):
             if hasattr(dataset_train, 'set_epoch'):
@@ -1049,9 +1070,15 @@ def main():
             })
             bin_m and bin_m.reset()
 
-            if args.early_stop:
-                if (epoch - best_epoch) > args.early_stop:
-                    break  # stop training
+            should_stop = False
+            if args.early_stop and best_epoch is not None:
+                should_stop = (epoch - best_epoch) > args.early_stop
+            if args.distributed:
+                stop_tensor = torch.tensor(int(should_stop), device=device)
+                torch.distributed.broadcast(stop_tensor, src=0)
+                should_stop = bool(stop_tensor.item())
+            if should_stop:
+                break  # stop training
             
     except KeyboardInterrupt:
         pass
@@ -1230,6 +1257,30 @@ def train_one_epoch(
     return OrderedDict([('loss', losses_m.avg)])
 
 
+def _metric_update_tensors(output, target, num_classes, distributed):
+    """Return metric update tensors on CUDA for NCCL DDP, CPU otherwise."""
+    if num_classes == 2:
+        pred = output[:, 1]
+        truth = target[:, 0].int()
+    else:
+        pred = output
+        truth = target.int()
+    if not distributed:
+        pred = pred.cpu()
+        truth = truth.cpu()
+    return pred, truth
+
+
+def _move_metric_result_to_cpu(value):
+    if torch.is_tensor(value):
+        return value.detach().cpu()
+    if isinstance(value, tuple):
+        return tuple(_move_metric_result_to_cpu(item) for item in value)
+    if isinstance(value, list):
+        return [_move_metric_result_to_cpu(item) for item in value]
+    return value
+
+
 def validate(
         model,
         loader,
@@ -1286,12 +1337,9 @@ def validate(
                     
                 if not ssl and not args.mse_loss and not args.mslq_loss:
                     if ecgflow_input:
-                        if args.num_classes == 2:
-                            bin_d_step = bin_m(output[:,1].cpu(),
-                                               target[:,0].cpu().int())
-                        elif args.num_classes > 2:
-                            bin_d_step = bin_m(output.cpu(),
-                                               target.cpu().int())
+                        metric_pred, metric_target = _metric_update_tensors(
+                            output, target, args.num_classes, args.distributed)
+                        bin_d_step = bin_m(metric_pred, metric_target)
                     else:
                         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))                        
 
@@ -1314,6 +1362,7 @@ def validate(
                 if ecgflow_input:
                     bin_d = bin_m.compute()
                     roc = bin_d.pop('ROC', None)
+                    roc = _move_metric_result_to_cpu(roc)
                     bin_d = {k:v.item() for k,v in bin_d.items()}
                 else:
                     top1_m.update(acc1.item(), output.size(0))

@@ -17,6 +17,7 @@ import importlib.util
 import json
 import math
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -309,6 +310,65 @@ def _format_run_name(run_name):
     return run_name.format(datetime=datetime.now().strftime("%Y-%m-%d-%H:%M"))
 
 
+def _is_distributed_env():
+    return int(os.environ.get("WORLD_SIZE", "1")) > 1
+
+
+def _num_visible_cuda_devices(cuda_visible_devices):
+    if not cuda_visible_devices:
+        return 1
+    devices = [item.strip() for item in str(cuda_visible_devices).split(",")]
+    devices = [item for item in devices if item]
+    return max(1, len(devices))
+
+
+def _apply_distributed_env(args, env):
+    env.setdefault("OMP_NUM_THREADS", "1")
+    env.setdefault("NCCL_DEBUG", "WARN")
+    env.setdefault("TORCH_NCCL_ASYNC_ERROR_HANDLING", "1")
+
+    if args.nccl_safe_mode:
+        env.setdefault("NCCL_IB_DISABLE", "1")
+        env.setdefault("NCCL_P2P_DISABLE", "1")
+        env.setdefault("NCCL_SHM_DISABLE", "1")
+
+    for key, value in args.distributed_env.items():
+        env[str(key)] = str(value)
+
+
+def _launch_distributed_if_needed(args):
+    if _is_distributed_env():
+        return
+
+    nproc = _num_visible_cuda_devices(args.cuda_visible_devices)
+    if nproc <= 1 or not args.distributed:
+        return
+
+    env = os.environ.copy()
+    if args.cuda_visible_devices is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(args.cuda_visible_devices)
+    _apply_distributed_env(args, env)
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--standalone",
+        "--nproc_per_node",
+        str(nproc),
+        str(Path(__file__).resolve()),
+        *sys.argv[1:],
+    ]
+    if args.wandb_run_name:
+        cmd.extend(["--wandb-run-name", args.wandb_run_name])
+    print(
+        f"Launching distributed training with {nproc} processes "
+        f"on CUDA_VISIBLE_DEVICES={env.get('CUDA_VISIBLE_DEVICES')} "
+        f"(backend={args.distributed_backend}, nccl_safe_mode={args.nccl_safe_mode})"
+    )
+    raise SystemExit(subprocess.run(cmd, env=env).returncode)
+
+
 def parse_args():
     config_parser = argparse.ArgumentParser(add_help=False)
     config_parser.add_argument("-c", "--config", default=None, help="JSON config file.")
@@ -359,6 +419,9 @@ def parse_args():
                         help="Weights & Biases entity/team.")
     parser.add_argument("--wandb-tags", nargs="*", default=config.get("wandb_tags", []),
                         help="Weights & Biases tags.")
+    parser.add_argument("--wandb-skip-system-info", action=argparse.BooleanOptionalAction,
+                        default=config.get("wandb_skip_system_info", True),
+                        help="Disable W&B system stats, machine info, metadata, git, and code logging.")
     parser.add_argument(
         "--cuda-visible-devices",
         default=config.get("cuda_visible_devices"),
@@ -367,6 +430,14 @@ def parse_args():
             "is imported, e.g. '0', '1', or '0,2'."
         ),
     )
+    parser.add_argument("--distributed", action=argparse.BooleanOptionalAction,
+                        default=config.get("distributed", True),
+                        help="Launch multi-process DDP when multiple CUDA devices are visible.")
+    parser.add_argument("--distributed-backend", default=config.get("distributed_backend", "nccl"),
+                        help="Distributed process-group backend passed to the trainer.")
+    parser.add_argument("--nccl-safe-mode", action=argparse.BooleanOptionalAction,
+                        default=config.get("nccl_safe_mode", True),
+                        help="Set conservative NCCL env vars for container multi-GPU stability.")
     parser.add_argument(
         "--extra-train-args",
         nargs="*",
@@ -392,6 +463,9 @@ def parse_args():
         args.wandb_tags = []
     if not isinstance(args.wandb_tags, list):
         parser.error("wandb_tags must be a list of strings")
+    args.distributed_env = config.get("distributed_env", {})
+    if not isinstance(args.distributed_env, dict):
+        parser.error("distributed_env must be a JSON object")
     args.wandb_run_name = _format_run_name(args.wandb_run_name)
     passthrough = [str(item) for item in args.extra_train_args] + passthrough
     return args, passthrough
@@ -401,6 +475,7 @@ def main():
     args, passthrough = parse_args()
     if args.cuda_visible_devices is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
+    _launch_distributed_if_needed(args)
 
     metadata_file = Path(args.metadata_file).expanduser()
     data_dir = Path(args.data_dir).expanduser() if args.data_dir else metadata_file.parent
@@ -449,6 +524,7 @@ def main():
         "--eval-metric", "AUROC",
         "--workers", str(args.workers),
         "--checkpoint-hist", str(args.checkpoint_hist),
+        "--dist-backend", args.distributed_backend,
         "--notch-freq", str(args.notch_freq),
         "--bandpass-freq", str(args.bandpass_freq[0]), str(args.bandpass_freq[1]),
         "--output", str(Path(args.output).expanduser()),
@@ -467,6 +543,8 @@ def main():
     if args.wandb_tags:
         train_argv.append("--wandb-tags")
         train_argv.extend([str(tag) for tag in args.wandb_tags])
+    if args.wandb_skip_system_info:
+        train_argv.append("--wandb-skip-system-info")
     train_argv.extend(passthrough)
 
     old_argv = sys.argv

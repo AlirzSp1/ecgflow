@@ -2,8 +2,8 @@
   "metadata_file": "data/MIMIC_paired_ECG_LVEF_filtered.csv",
   "data_dir": "/home/ubuntu/BackupFiles/soheili/DATA/mimic-iv-ecg-diagnostic-electrocardiogram-matched-subset-1.0",
   "pretrained_path": "models/ecgflow_ssl_mimic/model.safetensors",
-  "output": "~/ecgflow/experiments/custom_lvef",
-  "experiment": "mvtst-p50-d12-h8.custom-lvef",
+  "output": "experiments/mimic_lvef",
+  "experiment": "mvtst-p50-d12-h8.mimic-lvef",
   "model": "mvtst_base_patch50",
   "seed": 20241153,
   "batch_size": 128,
@@ -26,6 +26,14 @@
   "wandb_run_name": "MIMIC_LVEF_ecgflow_{datetime}",
   "wandb_entity": "",
   "wandb_tags": ["ecgflow", "mimic", "lvef", "fine-tune"],
-  "cuda_visible_devices": "0",
+  "wandb_skip_system_info": true,
+  "cuda_visible_devices": "0,1",
+  "distributed": true,
+  "distributed_backend": "nccl",
+  "nccl_safe_mode": true,
+  "distributed_env": {
+    "NCCL_TIMEOUT": "120",
+    "TORCH_DISTRIBUTED_DEBUG": "DETAIL"
+  },
   "extra_train_args": []
 }
