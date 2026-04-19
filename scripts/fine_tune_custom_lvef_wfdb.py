@@ -10,12 +10,11 @@ Metadata format:
 
 Example:
   uv run scripts/fine_tune_custom_lvef_wfdb.py \
-      --metadata-file data/my_lvef/meta.csv \
-      --data-dir data/my_lvef \
-      --pretrained-path experiments/mimic/mtsm-p50-d12-h8/last.safetensors
+      --config config.json
 """
 import argparse
 import importlib.util
+import json
 import math
 import os
 import sys
@@ -284,41 +283,93 @@ def _load_train_module():
     return module
 
 
+def _load_json_config(config_file):
+    if not config_file:
+        default_config = Path("config.json")
+        if not default_config.exists():
+            return {}, None
+        config_file = default_config
+
+    config_path = Path(config_file).expanduser()
+    with open(config_path, "rt", encoding="utf-8") as fp:
+        config = json.load(fp)
+    if not isinstance(config, dict):
+        raise ValueError(f"{config_path} must contain a JSON object")
+
+    normalized = {}
+    for key, value in config.items():
+        normalized[key.replace("-", "_")] = value
+    return normalized, config_path
+
+
 def parse_args():
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("-c", "--config", default=None, help="JSON config file.")
+    config_args, remaining = config_parser.parse_known_args()
+    config, config_path = _load_json_config(config_args.config)
+
     parser = argparse.ArgumentParser(
         description="Fine-tune the SSL-pretrained ECGFlow 1dViT on custom WFDB low-LVEF labels.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--metadata-file", required=True, help="CSV/TSV metadata file.")
-    parser.add_argument("--data-dir", default=None, help="Root for relative WFDB record paths.")
-    parser.add_argument("--pretrained-path", required=True, help="SSL checkpoint path.")
-    parser.add_argument("--output", default="~/ecgflow/experiments/custom_lvef")
-    parser.add_argument("--experiment", default="mvtst-p50-d12-h8.custom-lvef")
-    parser.add_argument("--model", default="mvtst_base_patch50")
-    parser.add_argument("--seed", type=int, default=20241153)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--workers", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=5e-5)
-    parser.add_argument("--val-fraction", type=float, default=0.15)
-    parser.add_argument("--test-fraction", type=float, default=0.0)
-    parser.add_argument("--target-sample-rate", type=float, default=500.0)
-    parser.add_argument("--target-length", type=int, default=5000)
-    parser.add_argument("--notch-freq", type=float, default=60.0)
-    parser.add_argument("--bandpass-freq", type=float, nargs=2, default=(0.01, 150))
-    parser.add_argument("--filter-wf", action="store_true", help="Apply ECGFlow notch/bandpass filter.")
-    parser.add_argument("--scale-source", choices=("ptbxl", "mimic"), default="ptbxl")
-    parser.add_argument("--input-channels", type=int, choices=(8, 12), default=8)
-    parser.add_argument("--swap-avl-avf", action="store_true", help="Swap aVL/aVF before channel trimming.")
+    parser.add_argument("-c", "--config", default=config_args.config or (config_path.as_posix() if config_path else None),
+                        help="JSON config file.")
+    parser.add_argument("--metadata-file", default=config.get("metadata_file"), help="CSV/TSV metadata file.")
+    parser.add_argument("--data-dir", default=config.get("data_dir"), help="Root for relative WFDB record paths.")
+    parser.add_argument("--pretrained-path", default=config.get("pretrained_path"), help="SSL checkpoint path.")
+    parser.add_argument("--output", default=config.get("output", "~/ecgflow/experiments/custom_lvef"))
+    parser.add_argument("--experiment", default=config.get("experiment", "mvtst-p50-d12-h8.custom-lvef"))
+    parser.add_argument("--model", default=config.get("model", "mvtst_base_patch50"))
+    parser.add_argument("--seed", type=int, default=config.get("seed", 20241153))
+    parser.add_argument("--batch-size", type=int, default=config.get("batch_size", 128))
+    parser.add_argument("--epochs", type=int, default=config.get("epochs", 100))
+    parser.add_argument("--workers", type=int, default=config.get("workers", 8))
+    parser.add_argument("--lr", type=float, default=config.get("lr", 5e-5))
+    parser.add_argument("--val-fraction", type=float, default=config.get("val_fraction", 0.15))
+    parser.add_argument("--test-fraction", type=float, default=config.get("test_fraction", 0.0))
+    parser.add_argument("--target-sample-rate", type=float, default=config.get("target_sample_rate", 500.0))
+    parser.add_argument("--target-length", type=int, default=config.get("target_length", 5000))
+    parser.add_argument("--notch-freq", type=float, default=config.get("notch_freq", 60.0))
+    parser.add_argument("--bandpass-freq", type=float, nargs=2, default=config.get("bandpass_freq", (0.01, 150)))
+    parser.add_argument("--filter-wf", action=argparse.BooleanOptionalAction,
+                        default=config.get("filter_wf", False),
+                        help="Apply ECGFlow notch/bandpass filter.")
+    parser.add_argument("--scale-source", choices=("ptbxl", "mimic"), default=config.get("scale_source", "ptbxl"))
+    parser.add_argument("--input-channels", type=int, choices=(8, 12), default=config.get("input_channels", 8))
+    parser.add_argument("--swap-avl-avf", action=argparse.BooleanOptionalAction,
+                        default=config.get("swap_avl_avf", False),
+                        help="Swap aVL/aVF before channel trimming.")
     parser.add_argument(
         "--cuda-visible-devices",
-        default=None,
+        default=config.get("cuda_visible_devices"),
         help=(
             "Set CUDA_VISIBLE_DEVICES for this training process before PyTorch "
             "is imported, e.g. '0', '1', or '0,2'."
         ),
     )
-    return parser.parse_known_args()
+    parser.add_argument(
+        "--extra-train-args",
+        nargs="*",
+        default=config.get("extra_train_args", []),
+        help="Additional arguments passed through to scripts/train.py.",
+    )
+
+    args, passthrough = parser.parse_known_args(remaining)
+    missing = []
+    if not args.metadata_file:
+        missing.append("metadata_file")
+    if not args.pretrained_path:
+        missing.append("pretrained_path")
+    if missing:
+        parser.error(
+            "missing required argument(s): "
+            + ", ".join(missing)
+            + ". Provide them in config.json or on the command line."
+        )
+    if not isinstance(args.extra_train_args, list):
+        parser.error("extra_train_args must be a list of command-line tokens")
+    passthrough = [str(item) for item in args.extra_train_args] + passthrough
+    return args, passthrough
 
 
 def main():
