@@ -18,6 +18,7 @@ import json
 import math
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -302,6 +303,12 @@ def _load_json_config(config_file):
     return normalized, config_path
 
 
+def _format_run_name(run_name):
+    if not run_name:
+        return run_name
+    return run_name.format(datetime=datetime.now().strftime("%Y-%m-%d-%H:%M"))
+
+
 def parse_args():
     config_parser = argparse.ArgumentParser(add_help=False)
     config_parser.add_argument("-c", "--config", default=None, help="JSON config file.")
@@ -324,6 +331,8 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=config.get("batch_size", 128))
     parser.add_argument("--epochs", type=int, default=config.get("epochs", 100))
     parser.add_argument("--workers", type=int, default=config.get("workers", 8))
+    parser.add_argument("--checkpoint-hist", type=int, default=config.get("checkpoint_hist", 100),
+                        help="Number of epoch checkpoints to keep.")
     parser.add_argument("--lr", type=float, default=config.get("lr", 5e-5))
     parser.add_argument("--val-fraction", type=float, default=config.get("val_fraction", 0.15))
     parser.add_argument("--test-fraction", type=float, default=config.get("test_fraction", 0.0))
@@ -339,6 +348,17 @@ def parse_args():
     parser.add_argument("--swap-avl-avf", action=argparse.BooleanOptionalAction,
                         default=config.get("swap_avl_avf", False),
                         help="Swap aVL/aVF before channel trimming.")
+    parser.add_argument("--log-wandb", action=argparse.BooleanOptionalAction,
+                        default=config.get("log_wandb", False),
+                        help="Log train and validation metrics to Weights & Biases.")
+    parser.add_argument("--wandb-project", default=config.get("wandb_project"),
+                        help="Weights & Biases project name.")
+    parser.add_argument("--wandb-run-name", default=config.get("wandb_run_name"),
+                        help="Weights & Biases run name.")
+    parser.add_argument("--wandb-entity", default=config.get("wandb_entity"),
+                        help="Weights & Biases entity/team.")
+    parser.add_argument("--wandb-tags", nargs="*", default=config.get("wandb_tags", []),
+                        help="Weights & Biases tags.")
     parser.add_argument(
         "--cuda-visible-devices",
         default=config.get("cuda_visible_devices"),
@@ -368,6 +388,11 @@ def parse_args():
         )
     if not isinstance(args.extra_train_args, list):
         parser.error("extra_train_args must be a list of command-line tokens")
+    if args.wandb_tags is None:
+        args.wandb_tags = []
+    if not isinstance(args.wandb_tags, list):
+        parser.error("wandb_tags must be a list of strings")
+    args.wandb_run_name = _format_run_name(args.wandb_run_name)
     passthrough = [str(item) for item in args.extra_train_args] + passthrough
     return args, passthrough
 
@@ -423,7 +448,7 @@ def main():
         "--batch-size", str(args.batch_size),
         "--eval-metric", "AUROC",
         "--workers", str(args.workers),
-        "--checkpoint-hist", "3",
+        "--checkpoint-hist", str(args.checkpoint_hist),
         "--notch-freq", str(args.notch_freq),
         "--bandpass-freq", str(args.bandpass_freq[0]), str(args.bandpass_freq[1]),
         "--output", str(Path(args.output).expanduser()),
@@ -431,6 +456,17 @@ def main():
     ]
     if args.filter_wf:
         train_argv.append("--filter-wf")
+    if args.log_wandb:
+        train_argv.append("--log-wandb")
+    if args.wandb_project:
+        train_argv.extend(["--wandb-project", args.wandb_project])
+    if args.wandb_run_name:
+        train_argv.extend(["--wandb-run-name", args.wandb_run_name])
+    if args.wandb_entity:
+        train_argv.extend(["--wandb-entity", args.wandb_entity])
+    if args.wandb_tags:
+        train_argv.append("--wandb-tags")
+        train_argv.extend([str(tag) for tag in args.wandb_tags])
     train_argv.extend(passthrough)
 
     old_argv = sys.argv

@@ -406,6 +406,14 @@ group.add_argument('--use-multi-epochs-loader', action='store_true', default=Fal
                    help='use the multi-epochs-loader to save time at the beginning of every epoch')
 group.add_argument('--log-wandb', action='store_true', default=False,
                    help='log training and validation metrics to wandb')
+group.add_argument('--wandb-project', default='', type=str,
+                   help='Weights & Biases project name (default: experiment name)')
+group.add_argument('--wandb-run-name', default='', type=str,
+                   help='Weights & Biases run name')
+group.add_argument('--wandb-entity', default='', type=str,
+                   help='Weights & Biases entity/team')
+group.add_argument('--wandb-tags', nargs='*', default=[],
+                   help='Weights & Biases tags')
 group.add_argument('--early-stop', default=None, type=int, metavar='N',
                    help=('stop training iterations early if evaluation metric '
                          'on validation data does not improve for N epochs'))
@@ -903,7 +911,13 @@ def main():
 
     if utils.is_primary(args) and args.log_wandb:
         if has_wandb:
-            wandb.init(project=args.experiment, config=args)
+            wandb.init(
+                project=args.wandb_project or args.experiment,
+                name=args.wandb_run_name or None,
+                entity=args.wandb_entity or None,
+                tags=args.wandb_tags or None,
+                config=args,
+            )
         else:
             _logger.warning(
                 "You've requested to log metrics to wandb but package not found. "

@@ -9,6 +9,7 @@
   "batch_size": 128,
   "epochs": 100,
   "workers": 8,
+  "checkpoint_hist": 100,
   "lr": 0.00005,
   "val_fraction": 0.15,
   "test_fraction": 0.0,
@@ -20,6 +21,11 @@
   "scale_source": "ptbxl",
   "input_channels": 8,
   "swap_avl_avf": false,
+  "log_wandb": true,
+  "wandb_project": "ecg2echo",
+  "wandb_run_name": "MIMIC_LVEF_ecgflow_{datetime}",
+  "wandb_entity": "",
+  "wandb_tags": ["ecgflow", "mimic", "lvef", "fine-tune"],
   "cuda_visible_devices": "0",
   "extra_train_args": []
 }
