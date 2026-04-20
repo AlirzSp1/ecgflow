@@ -465,7 +465,19 @@ def parse_args():
                         help="Validation metric used for best checkpoint and early stopping.")
     parser.add_argument("--metric-threshold", type=float, default=config.get("metric_threshold", 0.3),
                         help="Probability threshold for Accuracy/Sensitivity/Specificity.")
+    parser.add_argument("--target-sensitivity", type=float, default=config.get("target_sensitivity", 0.8),
+                        help="Sensitivity target for ROC-derived screening checkpoint metrics.")
     parser.add_argument("--lr", type=float, default=config.get("lr", 5e-5))
+    parser.add_argument("--opt", default=config.get("opt", "adamw"),
+                        help="Optimizer passed to train.py.")
+    parser.add_argument("--sched", default=config.get("sched", "cosine"),
+                        help="LR scheduler passed to train.py.")
+    parser.add_argument("--warmup-epochs", type=int, default=config.get("warmup_epochs", 2),
+                        help="Number of LR warmup epochs.")
+    parser.add_argument("--weight-decay", type=float, default=config.get("weight_decay", 0.01),
+                        help="Optimizer weight decay.")
+    parser.add_argument("--bce-pos-weight", type=float, default=config.get("bce_pos_weight", 1.5),
+                        help="Positive-class weight for BCE loss.")
     parser.add_argument("--val-fraction", type=float, default=config.get("val_fraction", 0.15))
     parser.add_argument("--test-fraction", type=float, default=config.get("test_fraction", 0.0))
     parser.add_argument(
@@ -602,19 +614,20 @@ def main():
         "--model-kwargs", f"img_size={args.target_length}",
         "--input-size", "1", str(args.input_channels), str(args.target_length),
         "--num-classes", "2",
-        "--warmup-epochs", "5",
-        "--opt", "adamw",
+        "--warmup-epochs", str(args.warmup_epochs),
+        "--opt", args.opt,
         "--epochs", str(args.epochs),
         "--bce-loss",
         "--smoothing", "0.001",
-        "--sched", "cosine",
+        "--sched", args.sched,
         "--lr", str(args.lr),
         "--lr-k-decay", "1",
         "--sched-on-updates",
-        "--weight-decay", "0",
+        "--weight-decay", str(args.weight_decay),
         "--batch-size", str(args.batch_size),
         "--eval-metric", args.eval_metric,
         "--binary-metric-threshold", str(args.metric_threshold),
+        "--target-sensitivity", str(args.target_sensitivity),
         "--workers", str(args.workers),
         "--checkpoint-hist", str(args.checkpoint_hist),
         "--dist-backend", args.distributed_backend,
@@ -623,6 +636,8 @@ def main():
         "--output", str(Path(args.output).expanduser()),
         "--experiment", args.experiment,
     ]
+    if args.bce_pos_weight is not None:
+        train_argv.extend(["--bce-pos-weight", str(args.bce_pos_weight)])
     if args.filter_wf:
         train_argv.append("--filter-wf")
     if args.log_wandb:

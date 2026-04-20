@@ -304,6 +304,8 @@ group.add_argument('--bce-pos-weight', type=float, default=None,
                    help='Positive weighting for BCE loss.')
 group.add_argument('--binary-metric-threshold', type=float, default=0.5,
                    help='Probability threshold for binary Accuracy/Sensitivity/Specificity metrics.')
+group.add_argument('--target-sensitivity', type=float, default=0.8,
+                   help='Target sensitivity used for ROC-derived checkpoint metrics.')
 group.add_argument('--reprob', type=float, default=0., metavar='PCT',
                    help='Random erase prob (default: 0.)')
 group.add_argument('--remode', type=str, default='pixel',
@@ -899,13 +901,17 @@ def main():
     # setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric if loader_eval is not None else 'loss'
     decreasing_metric = eval_metric == 'loss'
-    save_roc = (
-        eval_metric in ['Accuracy', 'AUROC', 'Sensitivity', 'Specificity']
-        and args.num_classes > 1
-    )
+    save_roc = args.num_classes > 1 and eval_metric in [
+        'Accuracy',
+        'AUROC',
+        'Sensitivity',
+        'Specificity',
+        'SpecificityAtTargetSensitivity',
+    ]
     print(
         f'eval_metric={eval_metric}; save_roc={save_roc}; '
-        f'binary_metric_threshold={args.binary_metric_threshold}'
+        f'binary_metric_threshold={args.binary_metric_threshold}; '
+        f'target_sensitivity={args.target_sensitivity}'
     )
     best_metric = None
     best_epoch = None
@@ -1304,6 +1310,35 @@ def _move_metric_result_to_cpu(value):
     return value
 
 
+def _roc_target_sensitivity_metrics(roc, target_sensitivity):
+    """Return the best specificity among ROC points meeting target sensitivity."""
+    if roc is None or target_sensitivity is None:
+        return {}
+    if len(roc) != 3:
+        return {}
+
+    fpr, tpr, thresholds = roc
+    if fpr is None or tpr is None or thresholds is None or len(tpr) == 0:
+        return {}
+
+    fpr = fpr.float()
+    tpr = tpr.float()
+    thresholds = thresholds.float()
+    specificity = 1.0 - fpr
+    meets_target = tpr >= float(target_sensitivity)
+    if meets_target.any():
+        candidate_idx = torch.nonzero(meets_target, as_tuple=False).flatten()
+        best_idx = candidate_idx[torch.argmax(specificity[candidate_idx])]
+    else:
+        best_idx = torch.argmax(tpr)
+
+    return {
+        'SpecificityAtTargetSensitivity': specificity[best_idx].item(),
+        'SensitivityAtTargetSensitivity': tpr[best_idx].item(),
+        'ThresholdAtTargetSensitivity': thresholds[best_idx].item(),
+    }
+
+
 def validate(
         model,
         loader,
@@ -1391,6 +1426,9 @@ def validate(
                         roc = bin_d.pop('ROC', None)
                         roc = _move_metric_result_to_cpu(roc)
                         bin_d = {k:v.item() for k,v in bin_d.items()}
+                        bin_d.update(
+                            _roc_target_sensitivity_metrics(roc, args.target_sensitivity)
+                        )
                 else:
                     top1_m.update(acc1.item(), output.size(0))
                     top5_m.update(acc5.item(), output.size(0))
@@ -1408,6 +1446,11 @@ def validate(
                                     f'AUROC: {bin_d["AUROC"]:7.3f}  '
                                     f'Sensitivity: {bin_d["Sensitivity"]:7.3f}  '
                                     f'Specificity: {bin_d["Specificity"]:7.3f}')
+                        if 'SpecificityAtTargetSensitivity' in bin_d:
+                            log_msg += (
+                                f'  Spec@Sens: {bin_d["SpecificityAtTargetSensitivity"]:7.3f}'
+                                f'  Thresh@Sens: {bin_d["ThresholdAtTargetSensitivity"]:7.3f}'
+                            )
                     else:
                         log_msg += (f'Acc@1: {top1_m.val:>7.3f} ({top1_m.avg:>7.3f})  '
                                     f'Acc@5: {top5_m.val:>7.3f} ({top5_m.avg:>7.3f})')
