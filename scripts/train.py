@@ -420,6 +420,8 @@ group.add_argument('--wandb-tags', nargs='*', default=[],
                    help='Weights & Biases tags')
 group.add_argument('--wandb-skip-system-info', action='store_true', default=False,
                    help='disable W&B system stats, machine info, metadata, git, and code logging')
+group.add_argument('--wandb-config-json', default='', type=str,
+                   help='Extra JSON object to merge into the W&B config.')
 group.add_argument('--early-stop', default=None, type=int, metavar='N',
                    help=('stop training iterations early if evaluation metric '
                          'on validation data does not improve for N epochs'))
@@ -439,6 +441,17 @@ def _parse_args():
     # Cache the args as a text string to save them in the output dir later
     args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
     return args, args_text
+
+
+def _wandb_config_from_args(args):
+    config = {"train_args": vars(args).copy()}
+    config["train_args"].pop("wandb_config_json", None)
+    if args.wandb_config_json:
+        extra_config = json.loads(args.wandb_config_json)
+        if not isinstance(extra_config, dict):
+            raise ValueError("--wandb-config-json must decode to a JSON object")
+        config.update(extra_config)
+    return config
 
 
 def main():
@@ -932,7 +945,7 @@ def main():
                 name=args.wandb_run_name or None,
                 entity=args.wandb_entity or None,
                 tags=args.wandb_tags or None,
-                config=args,
+                config=_wandb_config_from_args(args),
                 settings=wandb_settings,
             )
         else:
@@ -1306,6 +1319,8 @@ def validate(
 
     end = time.time()
     last_idx = len(loader) - 1
+    bin_d = None
+    roc = None
     with torch.no_grad():
         for batch_idx, batch_d in enumerate(loader):
             if type(batch_d) is dict:
@@ -1339,7 +1354,7 @@ def validate(
                     if ecgflow_input:
                         metric_pred, metric_target = _metric_update_tensors(
                             output, target, args.num_classes, args.distributed)
-                        bin_d_step = bin_m(metric_pred, metric_target)
+                        bin_m.update(metric_pred, metric_target)
                     else:
                         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))                        
 
@@ -1358,29 +1373,31 @@ def validate(
                 torch.cuda.synchronize()
 
             losses_m.update(reduced_loss.item(), input.size(0))
+            should_log = last_batch or batch_idx % args.log_interval == 0
             if not ssl and not args.mse_loss and not args.mslq_loss:
                 if ecgflow_input:
-                    bin_d = bin_m.compute()
-                    roc = bin_d.pop('ROC', None)
-                    roc = _move_metric_result_to_cpu(roc)
-                    bin_d = {k:v.item() for k,v in bin_d.items()}
+                    if should_log:
+                        bin_d = bin_m.compute()
+                        roc = bin_d.pop('ROC', None)
+                        roc = _move_metric_result_to_cpu(roc)
+                        bin_d = {k:v.item() for k,v in bin_d.items()}
                 else:
                     top1_m.update(acc1.item(), output.size(0))
                     top5_m.update(acc5.item(), output.size(0))
 
             batch_time_m.update(time.time() - end)
             end = time.time()
-            if utils.is_primary(args) and (last_batch or batch_idx % args.log_interval == 0):
+            if utils.is_primary(args) and should_log:
                 log_name = 'Test' + log_suffix
                 log_msg = (f'{log_name}: [{batch_idx:>4d}/{last_idx}]  '
                            f'Time: {batch_time_m.val:.3f} ({batch_time_m.avg:.3f})  '
                            f'Loss: {losses_m.val:>7.3f} ({losses_m.avg:>6.3f})  ')
                 if not ssl and not args.mse_loss and not args.mslq_loss:
                     if ecgflow_input:
-                        log_msg += (f'Acc@1: {bin_d_step["Accuracy"]:>7.3f} '
-                                    f'({bin_d["Accuracy"]:>7.3f})  '
-                                    f'AUROC: {bin_d_step["AUROC"]:>7.3f} '
-                                    f'({bin_d["AUROC"]:7.3f})')
+                        log_msg += (f'Acc@1: {bin_d["Accuracy"]:>7.3f}  '
+                                    f'AUROC: {bin_d["AUROC"]:7.3f}  '
+                                    f'Sensitivity: {bin_d["Sensitivity"]:7.3f}  '
+                                    f'Specificity: {bin_d["Specificity"]:7.3f}')
                     else:
                         log_msg += (f'Acc@1: {top1_m.val:>7.3f} ({top1_m.avg:>7.3f})  '
                                     f'Acc@5: {top5_m.val:>7.3f} ({top5_m.avg:>7.3f})')

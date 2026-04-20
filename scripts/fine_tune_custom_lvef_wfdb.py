@@ -17,6 +17,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -53,6 +54,8 @@ class CustomLvefConfig:
     target_length = 5000
     scale_source = "ptbxl"
     swap_avl_avf = False
+    split_group_by = "patient_from_path"
+    patient_id_regex = r"(p\d{8,})"
 
 
 def _read_metadata(metadata_file):
@@ -83,7 +86,21 @@ def _read_metadata(metadata_file):
     return df
 
 
-def _split_indices(labels, seed, val_fraction, test_fraction):
+def _split_indices(labels, seed, val_fraction, test_fraction, groups=None):
+    if groups is not None:
+        labels = np.asarray(labels)
+        groups = np.asarray(groups).astype(str)
+        group_table = pd.DataFrame({"group": groups, "label": labels})
+        group_labels = group_table.groupby("group", sort=False)["label"].max()
+        group_split = _split_indices(
+            group_labels.values,
+            seed=seed,
+            val_fraction=val_fraction,
+            test_fraction=test_fraction,
+        )
+        split_by_group = dict(zip(group_labels.index.astype(str), group_split))
+        return np.asarray([split_by_group[group] for group in groups], dtype=object)
+
     rng = np.random.default_rng(seed)
     labels = np.asarray(labels)
     split = np.empty(labels.shape[0], dtype=object)
@@ -105,6 +122,37 @@ def _split_indices(labels, seed, val_fraction, test_fraction):
     if np.all(split != "val") and val_fraction > 0 and len(split) > 1:
         split[rng.permutation(len(split))[0]] = "val"
     return split
+
+
+def _split_groups_from_metadata(df, split_group_by, patient_id_regex):
+    split_group_by = (split_group_by or "none").lower()
+    if split_group_by in ("none", "row", "rows"):
+        return None
+    if split_group_by == "ecg_id":
+        return df["ecg_id"].astype(str).values
+    if split_group_by == "record_path":
+        return df["record_path"].astype(str).values
+    if split_group_by != "patient_from_path":
+        raise ValueError(
+            "split_group_by must be one of: none, ecg_id, record_path, patient_from_path"
+        )
+
+    regex = re.compile(patient_id_regex)
+    groups = []
+    missing = 0
+    for ecg_id, record_path in zip(df["ecg_id"].astype(str), df["record_path"].astype(str)):
+        match = regex.search(record_path)
+        if match:
+            groups.append(match.group(1) if match.groups() else match.group(0))
+        else:
+            groups.append(ecg_id)
+            missing += 1
+    if missing:
+        print(
+            f"WARNING: patient_id_regex did not match {missing} record_path values; "
+            "using ecg_id for those rows."
+        )
+    return np.asarray(groups, dtype=object)
 
 
 def _resolve_record_path(record_path, data_dir, metadata_file):
@@ -181,11 +229,17 @@ class CustomLvefWfdbData:
             self.std = PTBXL_8CHANNEL_SD if trim_channels else PTBXL_12CHANNEL_SD
 
         df = _read_metadata(self.metadata_file)
+        split_groups = _split_groups_from_metadata(
+            df,
+            CustomLvefConfig.split_group_by,
+            CustomLvefConfig.patient_id_regex,
+        )
         df["split"] = _split_indices(
             df["low_lvef_flag"].values,
             seed=CustomLvefConfig.seed,
             val_fraction=CustomLvefConfig.val_fraction,
             test_fraction=CustomLvefConfig.test_fraction,
+            groups=split_groups,
         )
         if use_split in ("all", None):
             selected = df
@@ -310,6 +364,18 @@ def _format_run_name(run_name):
     return run_name.format(datetime=datetime.now().strftime("%Y-%m-%d-%H:%M"))
 
 
+def _json_safe(value):
+    if isinstance(value, Path):
+        return value.as_posix()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def _is_distributed_env():
     return int(os.environ.get("WORLD_SIZE", "1")) > 1
 
@@ -391,11 +457,25 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=config.get("batch_size", 128))
     parser.add_argument("--epochs", type=int, default=config.get("epochs", 100))
     parser.add_argument("--workers", type=int, default=config.get("workers", 8))
-    parser.add_argument("--checkpoint-hist", type=int, default=config.get("checkpoint_hist", 100),
-                        help="Number of epoch checkpoints to keep.")
+    parser.add_argument("--checkpoint-hist", type=int, default=config.get("checkpoint_hist", 3),
+                        help="Number of best epoch checkpoints to keep.")
     parser.add_argument("--lr", type=float, default=config.get("lr", 5e-5))
     parser.add_argument("--val-fraction", type=float, default=config.get("val_fraction", 0.15))
     parser.add_argument("--test-fraction", type=float, default=config.get("test_fraction", 0.0))
+    parser.add_argument(
+        "--split-group-by",
+        choices=("none", "ecg_id", "record_path", "patient_from_path"),
+        default=config.get("split_group_by", "patient_from_path"),
+        help=(
+            "Keep all rows from the same group in one split. "
+            "For MIMIC paths, patient_from_path extracts IDs such as p10000764."
+        ),
+    )
+    parser.add_argument(
+        "--patient-id-regex",
+        default=config.get("patient_id_regex", r"(p\d{8,})"),
+        help="Regex used by split_group_by=patient_from_path.",
+    )
     parser.add_argument("--target-sample-rate", type=float, default=config.get("target_sample_rate", 500.0))
     parser.add_argument("--target-length", type=int, default=config.get("target_length", 5000))
     parser.add_argument("--notch-freq", type=float, default=config.get("notch_freq", 60.0))
@@ -467,6 +547,10 @@ def parse_args():
     if not isinstance(args.distributed_env, dict):
         parser.error("distributed_env must be a JSON object")
     args.wandb_run_name = _format_run_name(args.wandb_run_name)
+    if args.wandb_run_name:
+        args.experiment = args.wandb_run_name
+    elif not args.experiment:
+        args.experiment = "custom_lvef"
     passthrough = [str(item) for item in args.extra_train_args] + passthrough
     return args, passthrough
 
@@ -489,6 +573,8 @@ def main():
     CustomLvefConfig.target_length = args.target_length
     CustomLvefConfig.scale_source = args.scale_source
     CustomLvefConfig.swap_avl_avf = args.swap_avl_avf
+    CustomLvefConfig.split_group_by = args.split_group_by
+    CustomLvefConfig.patient_id_regex = args.patient_id_regex
 
     _patch_ecgflow_dataset_registration()
     train_module = _load_train_module()
@@ -545,6 +631,12 @@ def main():
         train_argv.extend([str(tag) for tag in args.wandb_tags])
     if args.wandb_skip_system_info:
         train_argv.append("--wandb-skip-system-info")
+    if args.log_wandb:
+        wandb_config = {
+            "custom_config": _json_safe(vars(args)),
+            "custom_passthrough_args": _json_safe(passthrough),
+        }
+        train_argv.extend(["--wandb-config-json", json.dumps(wandb_config)])
     train_argv.extend(passthrough)
 
     old_argv = sys.argv
