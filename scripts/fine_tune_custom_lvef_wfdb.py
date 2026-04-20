@@ -456,9 +456,15 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=config.get("seed", 20241153))
     parser.add_argument("--batch-size", type=int, default=config.get("batch_size", 128))
     parser.add_argument("--epochs", type=int, default=config.get("epochs", 100))
+    parser.add_argument("--ft-top", type=int, default=config.get("ft_top", 6),
+                        help="Number of top transformer blocks to fine-tune.")
     parser.add_argument("--workers", type=int, default=config.get("workers", 8))
     parser.add_argument("--checkpoint-hist", type=int, default=config.get("checkpoint_hist", 3),
                         help="Number of best epoch checkpoints to keep.")
+    parser.add_argument("--eval-metric", default=config.get("eval_metric", "Sensitivity"),
+                        help="Validation metric used for best checkpoint and early stopping.")
+    parser.add_argument("--metric-threshold", type=float, default=config.get("metric_threshold", 0.3),
+                        help="Probability threshold for Accuracy/Sensitivity/Specificity.")
     parser.add_argument("--lr", type=float, default=config.get("lr", 5e-5))
     parser.add_argument("--val-fraction", type=float, default=config.get("val_fraction", 0.15))
     parser.add_argument("--test-fraction", type=float, default=config.get("test_fraction", 0.0))
@@ -586,7 +592,7 @@ def main():
         "--train-split", "train",
         "--val-split", "validation",
         "--early-stop", "10",
-        "--ft-top", "4",
+        "--ft-top", str(args.ft_top),
         "--pretrained",
         "--pretrained-path", str(Path(args.pretrained_path).expanduser()),
         "--dataset", f"ecgflow/{CUSTOM_DATASET_NAME}",
@@ -607,7 +613,8 @@ def main():
         "--sched-on-updates",
         "--weight-decay", "0",
         "--batch-size", str(args.batch_size),
-        "--eval-metric", "AUROC",
+        "--eval-metric", args.eval_metric,
+        "--binary-metric-threshold", str(args.metric_threshold),
         "--workers", str(args.workers),
         "--checkpoint-hist", str(args.checkpoint_hist),
         "--dist-backend", args.distributed_backend,

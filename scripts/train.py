@@ -302,6 +302,8 @@ group.add_argument('--bce-target-thresh', type=float, default=None,
                    help='Threshold for binarizing softened BCE targets (default: None, disabled).')
 group.add_argument('--bce-pos-weight', type=float, default=None,
                    help='Positive weighting for BCE loss.')
+group.add_argument('--binary-metric-threshold', type=float, default=0.5,
+                   help='Probability threshold for binary Accuracy/Sensitivity/Specificity metrics.')
 group.add_argument('--reprob', type=float, default=0., metavar='PCT',
                    help='Random erase prob (default: 0.)')
 group.add_argument('--remode', type=str, default='pixel',
@@ -897,8 +899,14 @@ def main():
     # setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric if loader_eval is not None else 'loss'
     decreasing_metric = eval_metric == 'loss'
-    save_roc = (eval_metric in ['Accuracy', 'AUROC']) and (args.num_classes > 1)
-    print(f'eval_metric={eval_metric}; save_roc={save_roc}')
+    save_roc = (
+        eval_metric in ['Accuracy', 'AUROC', 'Sensitivity', 'Specificity']
+        and args.num_classes > 1
+    )
+    print(
+        f'eval_metric={eval_metric}; save_roc={save_roc}; '
+        f'binary_metric_threshold={args.binary_metric_threshold}'
+    )
     best_metric = None
     best_epoch = None
     saver = None
@@ -982,7 +990,9 @@ def main():
         if not args.mse_loss and not args.mslq_loss:
             if args.num_classes == 2:
                 bin_m = utils.get_binary_torchmetrics(
-                    prefix='', compute_on_cpu=not args.distributed)
+                    prefix='',
+                    threshold=args.binary_metric_threshold,
+                    compute_on_cpu=not args.distributed)
             elif args.num_classes > 2:
                 bin_m = utils.get_multilabel_torchmetrics(args.num_classes,
                                                           prefix='',
