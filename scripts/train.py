@@ -1347,7 +1347,7 @@ def train_one_epoch(
 
             if args.distributed:
                 reduced_loss = utils.reduce_tensor(loss.data, args.world_size)
-                losses_m.update(reduced_loss.item() * accum_steps, input.size(0))
+                losses_m.update(reduced_loss.item() * accum_steps, _batch_size(input, target))
                 update_sample_count *= args.world_size
 
             if utils.is_primary(args):
@@ -1362,8 +1362,9 @@ def train_one_epoch(
                 )
 
                 if args.save_images and output_dir:
+                    save_input = input['X'] if isinstance(input, dict) else input
                     torchvision.utils.save_image(
-                        input,
+                        save_input,
                         os.path.join(output_dir, 'train-batch-%d.jpg' % batch_idx),
                         padding=0,
                         normalize=True
