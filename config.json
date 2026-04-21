@@ -4,7 +4,7 @@
   "pretrained_path": "models/ecgflow_ssl_mimic/model.safetensors",
   "output": "experiments/mimic_lvef",
   "model": "mvtst_base_patch50",
-  "use_demographics": true,
+  "use_demographics": false,
   "tabular_hidden_dim": 16,
   "tabular_dropout": 0.2,
   "seed": 20241153,

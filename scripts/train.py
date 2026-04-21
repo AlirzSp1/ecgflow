@@ -518,9 +518,12 @@ class ECGDemographicFusionModel(nn.Module):
         return self.head(fused)
 
 
-def _extract_batch_input_target(batch_d):
+def _extract_batch_input_target(batch_d, use_demographics: bool = False):
     if type(batch_d) is dict:
         target = batch_d['label']
+        if not use_demographics:
+            return batch_d['X'], target
+
         input_d = {'X': batch_d['X']}
         if 'tabular' in batch_d:
             input_d['tabular'] = batch_d['tabular']
@@ -1275,7 +1278,7 @@ def train_one_epoch(
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, batch_d in enumerate(loader):
-        input, target = _extract_batch_input_target(batch_d)
+        input, target = _extract_batch_input_target(batch_d, args.use_demographics)
         last_batch = batch_idx == last_batch_idx
         need_update = last_batch or (batch_idx + 1) % accum_steps == 0
         update_idx = batch_idx // accum_steps
@@ -1485,7 +1488,7 @@ def validate(
     roc = None
     with torch.no_grad():
         for batch_idx, batch_d in enumerate(loader):
-            input, target = _extract_batch_input_target(batch_d)
+            input, target = _extract_batch_input_target(batch_d, args.use_demographics)
             last_batch = batch_idx == last_idx
             if not args.prefetcher:
                 input = _move_input_to_device(input, device)
