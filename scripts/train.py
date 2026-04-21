@@ -426,6 +426,12 @@ group.add_argument('--wandb-skip-system-info', action='store_true', default=Fals
                    help='disable W&B system stats, machine info, metadata, git, and code logging')
 group.add_argument('--wandb-config-json', default='', type=str,
                    help='Extra JSON object to merge into the W&B config.')
+group.add_argument('--use-demographics', action='store_true', default=False,
+                   help='Fuse age and gender features with ECG backbone features.')
+group.add_argument('--tabular-hidden-dim', type=int, default=32, metavar='N',
+                   help='Hidden dimension for the age/gender fusion branch.')
+group.add_argument('--tabular-dropout', type=float, default=0.1, metavar='PCT',
+                   help='Dropout for the age/gender fusion branch.')
 group.add_argument('--early-stop', default=None, type=int, metavar='N',
                    help=('stop training iterations early if evaluation metric '
                          'on validation data does not improve for N epochs'))
@@ -456,6 +462,85 @@ def _wandb_config_from_args(args):
             raise ValueError("--wandb-config-json must decode to a JSON object")
         config.update(extra_config)
     return config
+
+
+class ECGDemographicFusionModel(nn.Module):
+    """Wrap an ECG backbone with a small age/gender fusion head."""
+
+    def __init__(
+            self,
+            backbone: nn.Module,
+            num_classes: int,
+            tabular_dim: int = 2,
+            tabular_hidden_dim: int = 32,
+            dropout: float = 0.1):
+        super().__init__()
+        self.backbone = backbone
+        self.backbone.reset_classifier(0)
+        self.tabular_dim = tabular_dim
+        self.num_classes = num_classes
+        self.num_features = getattr(backbone, 'num_features', None) or getattr(backbone, 'embed_dim')
+        self.tabular_mlp = nn.Sequential(
+            nn.Linear(tabular_dim, tabular_hidden_dim),
+            nn.LayerNorm(tabular_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.head_drop = nn.Dropout(dropout)
+        self.head = nn.Linear(self.num_features + tabular_hidden_dim, num_classes)
+
+    def get_classifier(self) -> nn.Module:
+        return self.head
+
+    def reset_classifier(self, num_classes: int, global_pool=None) -> None:
+        del global_pool
+        self.num_classes = num_classes
+        self.head = nn.Linear(self.num_features + self.tabular_mlp[0].out_features, num_classes)
+
+    def forward(self, x):
+        if isinstance(x, dict):
+            ecg = x['X']
+            tabular = x.get('tabular')
+        else:
+            ecg = x
+            tabular = None
+        features = self.backbone.forward_features(ecg)
+        features = self.backbone.forward_head(features, pre_logits=True)
+        if tabular is None:
+            tabular = features.new_zeros((features.shape[0], self.tabular_dim))
+        tabular_features = self.tabular_mlp(tabular)
+        fused = torch.cat([features, tabular_features], dim=1)
+        fused = self.head_drop(fused)
+        return self.head(fused)
+
+
+def _extract_batch_input_target(batch_d):
+    if type(batch_d) is dict:
+        target = batch_d['label']
+        input_d = {'X': batch_d['X']}
+        if 'tabular' in batch_d:
+            input_d['tabular'] = batch_d['tabular']
+        return input_d, target
+    return batch_d
+
+
+def _move_input_to_device(input, device):
+    if isinstance(input, dict):
+        return {k: v.to(device) for k, v in input.items()}
+    return input.to(device)
+
+
+def _set_input_channels_last(input):
+    if isinstance(input, dict):
+        input = dict(input)
+        input['X'] = input['X'].contiguous(memory_format=torch.channels_last)
+        return input
+    return input.contiguous(memory_format=torch.channels_last)
+
+
+def _batch_size(input, target):
+    del input
+    return target.size(0)
 
 
 def main():
@@ -599,6 +684,19 @@ def main():
     data_config = resolve_data_config(vars(args), model=model, verbose=utils.is_primary(args))
     if args.ecgflow_input:
         data_config['input_size'] = (in_chans, input_size)  # override for 1D input
+
+    if args.use_demographics and args.ecgflow_input:
+        model = ECGDemographicFusionModel(
+            model,
+            num_classes=args.num_classes,
+            tabular_hidden_dim=args.tabular_hidden_dim,
+            dropout=args.tabular_dropout,
+        )
+        if utils.is_primary(args):
+            _logger.info(
+                'Enabled age/gender fusion branch '
+                f'(hidden_dim={args.tabular_hidden_dim}, dropout={args.tabular_dropout}).'
+            )
 
     # setup augmentation batch splits for contrastive loss or split bn
     num_aug_splits = 0
@@ -1161,10 +1259,7 @@ def train_one_epoch(
     optimizer.zero_grad()
     update_sample_count = 0
     for batch_idx, batch_d in enumerate(loader):
-        if type(batch_d) is dict:
-            input, target = batch_d['X'], batch_d['label']
-        else:
-            input, target = batch_d
+        input, target = _extract_batch_input_target(batch_d)
         last_batch = batch_idx == last_batch_idx
         need_update = last_batch or (batch_idx + 1) % accum_steps == 0
         update_idx = batch_idx // accum_steps
@@ -1172,11 +1267,16 @@ def train_one_epoch(
             accum_steps = last_accum_steps
 
         if not args.prefetcher:
-            input, target = input.to(device), target.to(device)
+            input = _move_input_to_device(input, device)
+            target = target.to(device)
             if mixup_fn is not None:
-                input, target = mixup_fn(input, target)
+                if isinstance(input, dict):
+                    input = dict(input)
+                    input['X'], target = mixup_fn(input['X'], target)
+                else:
+                    input, target = mixup_fn(input, target)
         if args.channels_last:
-            input = input.contiguous(memory_format=torch.channels_last)
+            input = _set_input_channels_last(input)
 
         # multiply by accum steps to get equivalent for full update
         data_time_m.update(accum_steps * (time.time() - data_start_time))
@@ -1223,8 +1323,8 @@ def train_one_epoch(
             _backward(loss)
 
         if not args.distributed:
-            losses_m.update(loss.item() * accum_steps, input.size(0))
-        update_sample_count += input.size(0)
+            losses_m.update(loss.item() * accum_steps, _batch_size(input, target))
+        update_sample_count += _batch_size(input, target)
 
         if not need_update:
             data_start_time = time.time()
@@ -1368,16 +1468,13 @@ def validate(
     roc = None
     with torch.no_grad():
         for batch_idx, batch_d in enumerate(loader):
-            if type(batch_d) is dict:
-                input, target = batch_d['X'], batch_d['label']
-            else:
-                input, target = batch_d
+            input, target = _extract_batch_input_target(batch_d)
             last_batch = batch_idx == last_idx
             if not args.prefetcher:
-                input = input.to(device)
+                input = _move_input_to_device(input, device)
                 target = target.to(device)
             if args.channels_last:
-                input = input.contiguous(memory_format=torch.channels_last)
+                input = _set_input_channels_last(input)
 
             with amp_autocast():
                 if ssl:
@@ -1417,7 +1514,7 @@ def validate(
             if device.type == 'cuda':
                 torch.cuda.synchronize()
 
-            losses_m.update(reduced_loss.item(), input.size(0))
+            losses_m.update(reduced_loss.item(), _batch_size(input, target))
             should_log = last_batch or batch_idx % args.log_interval == 0
             if not ssl and not args.mse_loss and not args.mslq_loss:
                 if ecgflow_input:

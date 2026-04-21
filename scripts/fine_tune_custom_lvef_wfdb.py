@@ -255,6 +255,25 @@ class CustomLvefWfdbData:
             for p in self.df["record_path"].values
         ]
         self.label_data = self.df[["low_lvef_flag"]].values.astype(np.float32)
+        train_age = df.loc[df["split"] == "train", "age"].dropna()
+        if train_age.empty:
+            self.age_mean = 0.0
+            self.age_std = 1.0
+        else:
+            self.age_mean = float(train_age.mean())
+            self.age_std = float(train_age.std(ddof=0))
+            if self.age_std < 1e-6:
+                self.age_std = 1.0
+        age_values = self.df["age"].fillna(self.age_mean).astype(np.float32)
+        age_norm = ((age_values - self.age_mean) / self.age_std).to_numpy(dtype=np.float32)
+        gender_values = (
+            self.df["gender"]
+            .map({"female": 0.0, "male": 1.0})
+            .fillna(0.5)
+            .astype(np.float32)
+            .to_numpy()
+        )
+        self.tabular_data = np.stack([age_norm, gender_values], axis=1).astype(np.float32)
 
     def __len__(self):
         return len(self.id_list)
@@ -267,6 +286,7 @@ class CustomLvefWfdbDataset:
         self.id_list = data_instance.id_list
         self.record_list = data_instance.record_list
         self.label_data = data_instance.label_data
+        self.tabular_data = data_instance.tabular_data
         self.classes = data_instance.classes
         self.xkey_name = data_instance.xkey_name
         self.ykey = data_instance.ykey
@@ -306,6 +326,7 @@ class CustomLvefWfdbDataset:
             wf = torch.squeeze(wf, axis=0)
         return dict(
             X=wf.float(),
+            tabular=torch.from_numpy(self.tabular_data[idx]).float(),
             label=torch.from_numpy(self.label_data[idx]).float(),
         )
 
@@ -453,6 +474,13 @@ def parse_args():
     parser.add_argument("--output", default=config.get("output", "~/ecgflow/experiments/custom_lvef"))
     parser.add_argument("--experiment", default=config.get("experiment", "mvtst-p50-d12-h8.custom-lvef"))
     parser.add_argument("--model", default=config.get("model", "mvtst_base_patch50"))
+    parser.add_argument("--use-demographics", action=argparse.BooleanOptionalAction,
+                        default=config.get("use_demographics", True),
+                        help="Fuse normalized age and gender with ECG features.")
+    parser.add_argument("--tabular-hidden-dim", type=int, default=config.get("tabular_hidden_dim", 32),
+                        help="Hidden dimension for the age/gender fusion branch.")
+    parser.add_argument("--tabular-dropout", type=float, default=config.get("tabular_dropout", 0.1),
+                        help="Dropout for the age/gender fusion branch.")
     parser.add_argument("--seed", type=int, default=config.get("seed", 20241153))
     parser.add_argument("--batch-size", type=int, default=config.get("batch_size", 128))
     parser.add_argument("--epochs", type=int, default=config.get("epochs", 100))
@@ -636,6 +664,12 @@ def main():
         "--output", str(Path(args.output).expanduser()),
         "--experiment", args.experiment,
     ]
+    if args.use_demographics:
+        train_argv.extend([
+            "--use-demographics",
+            "--tabular-hidden-dim", str(args.tabular_hidden_dim),
+            "--tabular-dropout", str(args.tabular_dropout),
+        ])
     if args.bce_pos_weight is not None:
         train_argv.extend(["--bce-pos-weight", str(args.bce_pos_weight)])
     if args.filter_wf:
