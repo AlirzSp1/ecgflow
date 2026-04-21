@@ -465,7 +465,7 @@ def _wandb_config_from_args(args):
 
 
 class ECGDemographicFusionModel(nn.Module):
-    """Wrap an ECG backbone with a small age/gender fusion head."""
+    """Wrap an ECG backbone with a small gated age/gender fusion head."""
 
     def __init__(
             self,
@@ -486,8 +486,11 @@ class ECGDemographicFusionModel(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
         )
+        self.tabular_proj = nn.Linear(tabular_hidden_dim, self.num_features)
+        self.fusion_norm = nn.LayerNorm(self.num_features)
+        self.fusion_gate = nn.Parameter(torch.tensor(-2.0))
         self.head_drop = nn.Dropout(dropout)
-        self.head = nn.Linear(self.num_features + tabular_hidden_dim, num_classes)
+        self.head = nn.Linear(self.num_features, num_classes)
 
     def get_classifier(self) -> nn.Module:
         return self.head
@@ -495,7 +498,7 @@ class ECGDemographicFusionModel(nn.Module):
     def reset_classifier(self, num_classes: int, global_pool=None) -> None:
         del global_pool
         self.num_classes = num_classes
-        self.head = nn.Linear(self.num_features + self.tabular_mlp[0].out_features, num_classes)
+        self.head = nn.Linear(self.num_features, num_classes)
 
     def forward(self, x):
         if isinstance(x, dict):
@@ -509,7 +512,8 @@ class ECGDemographicFusionModel(nn.Module):
         if tabular is None:
             tabular = features.new_zeros((features.shape[0], self.tabular_dim))
         tabular_features = self.tabular_mlp(tabular)
-        fused = torch.cat([features, tabular_features], dim=1)
+        tabular_features = self.tabular_proj(tabular_features)
+        fused = self.fusion_norm(features + torch.sigmoid(self.fusion_gate) * tabular_features)
         fused = self.head_drop(fused)
         return self.head(fused)
 
@@ -541,6 +545,18 @@ def _set_input_channels_last(input):
 def _batch_size(input, target):
     del input
     return target.size(0)
+
+
+def _round_floats(value, decimals: int = 4):
+    if isinstance(value, float):
+        return round(value, decimals)
+    if isinstance(value, dict):
+        return {k: _round_floats(v, decimals) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_round_floats(v, decimals) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_round_floats(v, decimals) for v in value)
+    return value
 
 
 def main():
@@ -1214,7 +1230,7 @@ def main():
     if best_metric is not None:
         results['best'] = results['all'][best_epoch - start_epoch]
         _logger.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
-    print(f'--result\n{json.dumps(results, indent=4)}')
+    print(f'--result\n{json.dumps(_round_floats(results), indent=4)}')
 
 
 def train_one_epoch(

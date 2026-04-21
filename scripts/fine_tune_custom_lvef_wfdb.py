@@ -486,6 +486,8 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=config.get("epochs", 100))
     parser.add_argument("--ft-top", type=int, default=config.get("ft_top", 6),
                         help="Number of top transformer blocks to fine-tune.")
+    parser.add_argument("--early-stop", type=int, default=config.get("early_stop", 4),
+                        help="Stop after N epochs without improvement in the selection metric.")
     parser.add_argument("--workers", type=int, default=config.get("workers", 8))
     parser.add_argument("--checkpoint-hist", type=int, default=config.get("checkpoint_hist", 3),
                         help="Number of best epoch checkpoints to keep.")
@@ -500,8 +502,17 @@ def parse_args():
                         help="Optimizer passed to train.py.")
     parser.add_argument("--sched", default=config.get("sched", "cosine"),
                         help="LR scheduler passed to train.py.")
+    parser.add_argument("--sched-on-updates", action=argparse.BooleanOptionalAction,
+                        default=config.get("sched_on_updates", False),
+                        help="Step the scheduler on every optimizer update instead of per epoch.")
     parser.add_argument("--warmup-epochs", type=int, default=config.get("warmup_epochs", 2),
                         help="Number of LR warmup epochs.")
+    parser.add_argument("--patience-epochs", type=int, default=config.get("patience_epochs", 2),
+                        help="Patience for plateau scheduler.")
+    parser.add_argument("--cooldown-epochs", type=int, default=config.get("cooldown_epochs", 0),
+                        help="Cooldown epochs after LR reduction.")
+    parser.add_argument("--decay-rate", type=float, default=config.get("decay_rate", 0.5),
+                        help="LR decay factor for supported schedulers.")
     parser.add_argument("--weight-decay", type=float, default=config.get("weight_decay", 0.01),
                         help="Optimizer weight decay.")
     parser.add_argument("--bce-pos-weight", type=float, default=config.get("bce_pos_weight", 1.5),
@@ -631,7 +642,7 @@ def main():
         "--data-dir", data_dir.as_posix(),
         "--train-split", "train",
         "--val-split", "validation",
-        "--early-stop", "10",
+        "--early-stop", str(args.early_stop),
         "--ft-top", str(args.ft_top),
         "--pretrained",
         "--pretrained-path", str(Path(args.pretrained_path).expanduser()),
@@ -650,7 +661,9 @@ def main():
         "--sched", args.sched,
         "--lr", str(args.lr),
         "--lr-k-decay", "1",
-        "--sched-on-updates",
+        "--patience-epochs", str(args.patience_epochs),
+        "--cooldown-epochs", str(args.cooldown_epochs),
+        "--decay-rate", str(args.decay_rate),
         "--weight-decay", str(args.weight_decay),
         "--batch-size", str(args.batch_size),
         "--eval-metric", args.eval_metric,
@@ -664,6 +677,8 @@ def main():
         "--output", str(Path(args.output).expanduser()),
         "--experiment", args.experiment,
     ]
+    if args.sched_on_updates:
+        train_argv.append("--sched-on-updates")
     if args.use_demographics:
         train_argv.extend([
             "--use-demographics",
